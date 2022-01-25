@@ -6,7 +6,7 @@
 
 CONFIG_PATH=
 CONTAINER_NAME=
-CRI=
+CRI="docker exec -it  k3d-test-cl-server-0 crictl"
 DEFAULT_CONFIG_PATH=
 DESIRED_CONFIG_PATH=
 DIR="$(pwd)"
@@ -194,30 +194,45 @@ function _main
   done
   shift $(( OPTIND - 1 ))
 
-  if command -v docker &>/dev/null
-  then
-    CRI=docker
-  elif command -v podman &>/dev/null
-  then
-    CRI=podman
-    if ! ${PODMAN_ROOTLESS} && [[ ${EUID} -ne 0 ]]
+  # If CRI is already defined, skip this part
+  if [[ -z ${CRI+x} ]]; then
+    if command -v docker &>/dev/null
     then
-      read -r -p "You are running Podman in rootless mode. Continue? [Y/n] "
-      [[ -n ${REPLY} ]] && [[ ${REPLY} =~ (n|N) ]] && exit 0
+      CRI=docker
+    elif command -v podman &>/dev/null
+    then
+      CRI=podman
+      if ! ${PODMAN_ROOTLESS} && [[ ${EUID} -ne 0 ]]
+      then
+        read -r -p "You are running Podman in rootless mode. Continue? [Y/n] "
+        [[ -n ${REPLY} ]] && [[ ${REPLY} =~ (n|N) ]] && exit 0
+      fi
+    elif command -v crictl &>/dev/null
+    then
+      CRI=crictl
+    else
+      echo 'No supported Container Runtime Interface detected.'
+      exit 1
     fi
-  else
-    echo 'No supported Container Runtime Interface detected.'
-    exit 1
   fi
 
-  INFO=$(${CRI} ps --no-trunc --format "{{.Image}};{{.Names}}" --filter \
-    label=org.opencontainers.image.title="docker-mailserver" | tail -1)
+  if [[ $CRI  =~ "crictl" ]]; then
+    CONTAINER_ID=$(${CRI} ps --name mailserver -o=json)
+    if [[ -n ${CONTAINER_ID+x} ]]; then
+      CONTAINER_NAME=$(echo $CONTAINER_ID | jq -r ".containers[0].id")
+      IMAGE_NAME=$(${CRI} inspect $CONTAINER_NAME | jq -r ".status.image.image")
+    fi
+  else
+    INFO=$(${CRI} ps --no-trunc --format "{{.Image}};{{.Names}}" --filter \
+      label=org.opencontainers.image.title="docker-mailserver" | tail -1)
 
-  CONTAINER_NAME=${INFO#*;}
-  [[ -z ${IMAGE_NAME} ]] && IMAGE_NAME=${INFO%;*}
+    CONTAINER_NAME=${INFO#*;}
+    [[ -z ${IMAGE_NAME} ]] && IMAGE_NAME=${INFO%;*}
+  fi
+
   if [[ -z ${IMAGE_NAME} ]]
-  then
-    IMAGE_NAME=${NAME:-${DEFAULT_IMAGE_NAME}}
+    then
+      IMAGE_NAME=${NAME:-${DEFAULT_IMAGE_NAME}}
   fi
 
   if test -t 0
