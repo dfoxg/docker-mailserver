@@ -195,7 +195,7 @@ function _main
   shift $(( OPTIND - 1 ))
 
   # If CRI is already defined, skip this part
-  if [[ -z ${CRI+x} ]]; then
+  if [[ -z ${CRI} ]]; then
     if command -v docker &>/dev/null
     then
       CRI=docker
